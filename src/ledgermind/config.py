@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, SecretStr, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, ValidationError
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 DEFAULT_CONFIG_PATH = Path("config.toml")
@@ -23,10 +23,23 @@ DEFAULT_ENV_PATH = Path(".env")
 EXAMPLE_CONFIG_NAME = "config.example.toml"
 
 Mode = Literal["paper", "live"]
+LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
 
 
 class ConfigError(Exception):
     """The configuration is missing or invalid. The message is meant for the user."""
+
+
+class LoggingSettings(BaseModel):
+    """The ``[logging]`` section: console + rotating file in ``logs/``."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    level: LogLevel = "INFO"
+    # At least 1 KiB, so a value meant as megabytes (e.g. 5) fails instead of rotating constantly.
+    max_file_bytes: int = Field(default=5_000_000, ge=1024, strict=True)
+    # At least 1: the stdlib handler never rotates with 0, so the file would grow forever.
+    backup_count: int = Field(default=5, ge=1, strict=True)
 
 
 class Settings(BaseModel):
@@ -35,6 +48,7 @@ class Settings(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     mode: Mode = "paper"
+    logging: LoggingSettings = Field(default_factory=LoggingSettings)
 
 
 class Secrets(BaseSettings):

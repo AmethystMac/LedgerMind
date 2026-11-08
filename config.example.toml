@@ -7,3 +7,12 @@
 # "paper": simulated trades with real prices, no real money (the default).
 # "live":  real orders on Binance with the bot's own pot. Only switch after the paper month.
 mode = "paper"
+
+[logging]
+# How much detail to log: "DEBUG", "INFO", "WARNING", "ERROR" or "CRITICAL" (exact, uppercase).
+level = "INFO"
+# Logs go to the console and to logs/ledgermind.log. When that file reaches this size (in bytes,
+# minimum 1024) it is renamed to ledgermind.log.1 and a new one is started.
+max_file_bytes = 5_000_000
+# How many old files (ledgermind.log.1, .2, ...) to keep; the oldest is deleted. Minimum 1.
+backup_count = 5

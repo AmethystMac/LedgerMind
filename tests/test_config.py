@@ -7,6 +7,7 @@ import pytest
 from ledgermind.config import (
     AppConfig,
     ConfigError,
+    LoggingSettings,
     Secrets,
     Settings,
     load_config,
@@ -147,6 +148,84 @@ def test_load_or_exit_returns_config_when_valid(tmp_path: Path) -> None:
     config = load_config_or_exit(config_path, tmp_path / ".env")
 
     assert config.settings.mode == "live"
+
+
+# --- logging section -------------------------------------------------------------------
+
+
+def test_logging_defaults(tmp_path: Path) -> None:
+    config = load(tmp_path, "")
+
+    assert config.settings.logging == LoggingSettings()
+    assert config.settings.logging.level == "INFO"
+    assert config.settings.logging.max_file_bytes == 5_000_000
+    assert config.settings.logging.backup_count == 5
+
+
+def test_logging_section_loads(tmp_path: Path) -> None:
+    config = load(
+        tmp_path,
+        '[logging]\nlevel = "DEBUG"\nmax_file_bytes = 1_000_000\nbackup_count = 3\n',
+    )
+
+    assert config.settings.logging.level == "DEBUG"
+    assert config.settings.logging.max_file_bytes == 1_000_000
+    assert config.settings.logging.backup_count == 3
+
+
+@pytest.mark.parametrize("level", ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"])
+def test_valid_log_levels_load(tmp_path: Path, level: str) -> None:
+    config = load(tmp_path, f'[logging]\nlevel = "{level}"\n')
+
+    assert config.settings.logging.level == level
+
+
+def test_invalid_log_level_raises_clear_error(tmp_path: Path) -> None:
+    with pytest.raises(ConfigError) as excinfo:
+        load(tmp_path, '[logging]\nlevel = "LOUD"\n')
+
+    message = str(excinfo.value)
+    assert "logging.level" in message
+    assert "LOUD" in message
+    assert "INFO" in message
+
+
+@pytest.mark.parametrize("level", ["info", "Warning", "WARN", ""])
+def test_log_level_is_exact(tmp_path: Path, level: str) -> None:
+    with pytest.raises(ConfigError):
+        load(tmp_path, f'[logging]\nlevel = "{level}"\n')
+
+
+@pytest.mark.parametrize("size", [0, -1, 5, 1023])
+def test_too_small_max_file_bytes_is_rejected(tmp_path: Path, size: int) -> None:
+    with pytest.raises(ConfigError) as excinfo:
+        load(tmp_path, f"[logging]\nmax_file_bytes = {size}\n")
+
+    assert "logging.max_file_bytes" in str(excinfo.value)
+
+
+def test_smallest_max_file_bytes_is_accepted(tmp_path: Path) -> None:
+    config = load(tmp_path, "[logging]\nmax_file_bytes = 1024\n")
+
+    assert config.settings.logging.max_file_bytes == 1024
+
+
+@pytest.mark.parametrize("count", [0, -1])
+def test_backup_count_below_one_is_rejected(tmp_path: Path, count: int) -> None:
+    # A count of 0 would silently disable rotation and let the file grow forever.
+    with pytest.raises(ConfigError) as excinfo:
+        load(tmp_path, f"[logging]\nbackup_count = {count}\n")
+
+    assert "logging.backup_count" in str(excinfo.value)
+
+
+def test_unknown_logging_key_is_rejected(tmp_path: Path) -> None:
+    with pytest.raises(ConfigError) as excinfo:
+        load(tmp_path, '[logging]\nlevl = "DEBUG"\n')
+
+    message = str(excinfo.value)
+    assert "logging.levl" in message
+    assert "unknown" in message.lower()
 
 
 # --- committed templates stay in sync with the code ------------------------------------

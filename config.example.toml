@@ -1,0 +1,9 @@
+# LedgerMind settings.
+#
+# Copy this file to config.toml (which stays on your machine and is never committed) and edit
+# that copy. The bot refuses to start if config.toml is missing or has a bad or unknown value.
+# API keys and tokens do NOT go here; they go in .env (see .env.example).
+
+# "paper": simulated trades with real prices, no real money (the default).
+# "live":  real orders on Binance with the bot's own pot. Only switch after the paper month.
+mode = "paper"

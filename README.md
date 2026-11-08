@@ -13,6 +13,8 @@ Requires [uv](https://docs.astral.sh/uv/). uv installs the Python version pinned
 
 ```bash
 uv sync                                          # install from uv.lock
+cp config.example.toml config.toml              # your settings (never committed)
+cp .env.example .env                             # your API keys, only when needed
 uv run pytest                                    # run the tests (offline)
 uv run ruff check && uv run ruff format --check  # lint + format check
 uv run ruff format                               # apply formatting

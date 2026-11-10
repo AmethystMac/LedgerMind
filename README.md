@@ -21,3 +21,8 @@ uv run pytest                                    # run the tests (offline)
 uv run ruff check && uv run ruff format --check  # lint + format check
 uv run ruff format                               # apply formatting
 ```
+
+## Running it
+
+To set up the machine that runs the bot (tools, keeping it awake, starting it in tmux, checking
+on it over SSH), see [scripts/local_setup.md](scripts/local_setup.md).

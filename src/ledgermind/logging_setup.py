@@ -4,6 +4,9 @@ Every line starts with a UTC ISO-8601 timestamp, then the level, the logger name
 message. Modules log through ``logging.getLogger(__name__)``; only the entrypoint calls
 ``setup_logging``. Calling it again replaces the handlers it added earlier, so lines are never
 duplicated, and any other handlers on the root logger are left alone.
+
+Short-lived commands such as ``status`` log to the console only (``log_dir=None``): they never
+open the log file, so only the long-running bot ever rotates it.
 """
 
 import logging
@@ -29,23 +32,29 @@ class UtcIsoFormatter(logging.Formatter):
         return datetime.fromtimestamp(record.created, UTC).isoformat(timespec="milliseconds")
 
 
-def setup_logging(settings: LoggingSettings, log_dir: Path = DEFAULT_LOG_DIR) -> Path:
-    """Send logs to stderr and to ``log_dir/ledgermind.log``; return the log file's path."""
-    log_dir.mkdir(parents=True, exist_ok=True)
-    log_file = log_dir / LOG_FILE_NAME
+def setup_logging(settings: LoggingSettings, log_dir: Path | None = DEFAULT_LOG_DIR) -> Path | None:
+    """Send logs to stderr and to ``log_dir/ledgermind.log``; return the log file's path.
+
+    With ``log_dir=None`` logs go to stderr only, no file is touched and ``None`` is returned.
+    """
+    handlers: list[logging.Handler] = [logging.StreamHandler(sys.stderr)]
+    log_file = None
+    if log_dir is not None:
+        log_dir.mkdir(parents=True, exist_ok=True)
+        log_file = log_dir / LOG_FILE_NAME
+        handlers.append(
+            RotatingFileHandler(
+                log_file,
+                maxBytes=settings.max_file_bytes,
+                backupCount=settings.backup_count,
+                encoding="utf-8",
+            )
+        )
 
     formatter = UtcIsoFormatter(LOG_FORMAT)
-    console = logging.StreamHandler(sys.stderr)
-    file = RotatingFileHandler(
-        log_file,
-        maxBytes=settings.max_file_bytes,
-        backupCount=settings.backup_count,
-        encoding="utf-8",
-    )
-
     root = logging.getLogger()
     _remove_owned_handlers(root)
-    for handler in (console, file):
+    for handler in handlers:
         handler.setFormatter(formatter)
         setattr(handler, _OWNED_ATTR, True)
         root.addHandler(handler)

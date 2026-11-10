@@ -6,9 +6,25 @@ by time.
 """
 
 import sqlite3
+from dataclasses import dataclass
 from datetime import UTC, datetime
 
 INTERRUPTED_ERROR_TEXT = "interrupted: process stopped before the job finished"
+
+_JOB_RUN_COLUMNS = "id, job, started_at, finished_at, ok, items_processed, error_text"
+
+
+@dataclass(frozen=True)
+class JobRun:
+    """One row of ``job_runs``. ``finished_at`` and ``ok`` are ``None`` while it's running."""
+
+    id: int
+    job: str
+    started_at: datetime
+    finished_at: datetime | None
+    ok: bool | None
+    items_processed: int | None
+    error_text: str | None
 
 
 def to_db_time(moment: datetime) -> str:
@@ -16,6 +32,18 @@ def to_db_time(moment: datetime) -> str:
     if moment.tzinfo is None or moment.utcoffset() is None:
         raise ValueError(f"timestamp must be timezone-aware, got naive {moment!r}")
     return moment.astimezone(UTC).isoformat(timespec="milliseconds")
+
+
+def from_db_time(text: str) -> datetime:
+    """Read a timestamp written by ``to_db_time`` back as a timezone-aware UTC ``datetime``."""
+    moment = datetime.fromisoformat(text)
+    if moment.tzinfo is None:
+        raise ValueError(f"stored timestamp has no timezone: {text!r}")
+    return moment.astimezone(UTC)
+
+
+def _optional_time(text: str | None) -> datetime | None:
+    return None if text is None else from_db_time(text)
 
 
 # --- job_runs --------------------------------------------------------------------------
@@ -56,3 +84,42 @@ def close_interrupted_job_runs(conn: sqlite3.Connection, at: datetime) -> int:
         (to_db_time(at), INTERRUPTED_ERROR_TEXT),
     )
     return cursor.rowcount
+
+
+def latest_job_runs(conn: sqlite3.Connection) -> list[JobRun]:
+    """The most recent run of each job (finished or not), sorted by job name."""
+    rows = conn.execute(
+        f"SELECT {_JOB_RUN_COLUMNS} FROM job_runs "
+        "WHERE id IN (SELECT max(id) FROM job_runs GROUP BY job) ORDER BY job"
+    ).fetchall()
+    return [_job_run(row) for row in rows]
+
+
+def last_successful_job_run(conn: sqlite3.Connection, job: str) -> JobRun | None:
+    """The most recent run of ``job`` that finished with ``ok = 1``, or ``None``."""
+    row = conn.execute(
+        f"SELECT {_JOB_RUN_COLUMNS} FROM job_runs WHERE job = ? AND ok = 1 "
+        "ORDER BY id DESC LIMIT 1",
+        (job,),
+    ).fetchone()
+    return None if row is None else _job_run(row)
+
+
+def _job_run(row: tuple[object, ...]) -> JobRun:
+    run_id, job, started_at, finished_at, ok, items_processed, error_text = row
+    assert isinstance(run_id, int)
+    assert isinstance(job, str)
+    assert isinstance(started_at, str)
+    assert finished_at is None or isinstance(finished_at, str)
+    assert ok is None or isinstance(ok, int)
+    assert items_processed is None or isinstance(items_processed, int)
+    assert error_text is None or isinstance(error_text, str)
+    return JobRun(
+        id=run_id,
+        job=job,
+        started_at=from_db_time(started_at),
+        finished_at=_optional_time(finished_at),
+        ok=None if ok is None else bool(ok),
+        items_processed=items_processed,
+        error_text=error_text,
+    )

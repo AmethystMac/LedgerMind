@@ -3,6 +3,7 @@
 import logging
 import re
 from collections.abc import Iterator
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 import pytest
@@ -64,6 +65,46 @@ def test_writes_to_console_on_stderr(tmp_path: Path, capsys: pytest.CaptureFixtu
     captured = capsys.readouterr()
     assert "hello console" in captured.err
     assert "hello console" not in captured.out
+
+
+# --- console only ----------------------------------------------------------------------
+
+
+def test_console_only_writes_no_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.chdir(tmp_path)  # so a stray default logs/ folder would show up here
+
+    result = setup_logging(LoggingSettings(), None)
+    logging.getLogger("ledgermind.test").info("console only")
+
+    assert result is None
+    assert "console only" in capsys.readouterr().err
+    assert list(tmp_path.iterdir()) == []
+    assert not any(
+        isinstance(handler, RotatingFileHandler) for handler in logging.getLogger().handlers
+    )
+
+
+def test_console_only_after_full_setup_drops_the_file(tmp_path: Path) -> None:
+    setup_logging(LoggingSettings(), tmp_path)
+    setup_logging(LoggingSettings(), None)
+
+    logging.getLogger("ledgermind.test").info("not in the file")
+
+    assert "not in the file" not in read_log(tmp_path)
+
+
+def test_console_only_uses_level_from_config(capsys: pytest.CaptureFixture[str]) -> None:
+    setup_logging(LoggingSettings(level="WARNING"), None)
+    log = logging.getLogger("ledgermind.test")
+
+    log.info("quiet info")
+    log.warning("loud warning")
+
+    err = capsys.readouterr().err
+    assert "quiet info" not in err
+    assert "loud warning" in err
 
 
 # --- level from config -----------------------------------------------------------------

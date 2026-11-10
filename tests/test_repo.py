@@ -1,4 +1,4 @@
-"""Query helpers for job_runs: open a run, finish it, and close runs a crash left open."""
+"""Query helpers for job_runs: open, finish, close what a crash left open, and read back."""
 
 import re
 import sqlite3
@@ -11,9 +11,14 @@ import pytest
 from ledgermind.db.migrate import open_database
 from ledgermind.db.repo import (
     INTERRUPTED_ERROR_TEXT,
+    JobRun,
     close_interrupted_job_runs,
     finish_job_run,
+    from_db_time,
+    last_successful_job_run,
+    latest_job_runs,
     start_job_run,
+    to_db_time,
 )
 
 T0 = datetime(2026, 11, 9, 10, 0, 0, tzinfo=UTC)
@@ -146,3 +151,113 @@ def test_interrupted_text_says_what_happened() -> None:
 
 def test_close_interrupted_with_nothing_open_returns_zero(db: sqlite3.Connection) -> None:
     assert close_interrupted_job_runs(db, T1) == 0
+
+
+# --- from_db_time ----------------------------------------------------------------------
+
+
+def test_from_db_time_reads_back_what_to_db_time_wrote() -> None:
+    moment = T0.replace(microsecond=123_000)
+
+    assert from_db_time(to_db_time(moment)) == moment
+    assert from_db_time(to_db_time(moment)).tzinfo is not None
+
+
+def test_from_db_time_returns_utc() -> None:
+    assert from_db_time("2026-11-09T10:00:00.000+00:00").utcoffset() == timedelta(0)
+
+
+def test_from_db_time_rejects_text_without_offset() -> None:
+    with pytest.raises(ValueError, match="timezone"):
+        from_db_time("2026-11-09T10:00:00.000")
+
+
+# --- latest_job_runs -------------------------------------------------------------------
+
+
+def test_latest_job_runs_empty_table(db: sqlite3.Connection) -> None:
+    assert latest_job_runs(db) == []
+
+
+def test_latest_job_runs_gives_the_newest_run_of_each_job_by_name(
+    db: sqlite3.Connection,
+) -> None:
+    old = start_job_run(db, "heartbeat", T0)
+    finish_job_run(db, old, T0, ok=True, items_processed=0)
+    collector = start_job_run(db, "collector", T0)
+    finish_job_run(db, collector, T1, ok=False, error_text="TimeoutError: no reply")
+    new = start_job_run(db, "heartbeat", T1)
+    finish_job_run(db, new, T1, ok=True, items_processed=0)
+
+    assert latest_job_runs(db) == [
+        JobRun(
+            id=collector,
+            job="collector",
+            started_at=T0,
+            finished_at=T1,
+            ok=False,
+            items_processed=None,
+            error_text="TimeoutError: no reply",
+        ),
+        JobRun(
+            id=new,
+            job="heartbeat",
+            started_at=T1,
+            finished_at=T1,
+            ok=True,
+            items_processed=0,
+            error_text=None,
+        ),
+    ]
+
+
+def test_latest_job_runs_includes_a_run_still_going(db: sqlite3.Connection) -> None:
+    done = start_job_run(db, "collector", T0)
+    finish_job_run(db, done, T0, ok=True, items_processed=5)
+    running = start_job_run(db, "collector", T1)
+
+    (latest,) = latest_job_runs(db)
+
+    assert latest.id == running
+    assert latest.finished_at is None
+    assert latest.ok is None
+    assert latest.items_processed is None
+
+
+# --- last_successful_job_run -----------------------------------------------------------
+
+
+def test_last_successful_job_run_none_when_never_run(db: sqlite3.Connection) -> None:
+    assert last_successful_job_run(db, "heartbeat") is None
+
+
+def test_last_successful_job_run_skips_failed_and_running_runs(db: sqlite3.Connection) -> None:
+    good = start_job_run(db, "heartbeat", T0)
+    finish_job_run(db, good, T0, ok=True, items_processed=0)
+    failed = start_job_run(db, "heartbeat", T1)
+    finish_job_run(db, failed, T1, ok=False, error_text="boom")
+    start_job_run(db, "heartbeat", T1 + timedelta(seconds=60))
+
+    run = last_successful_job_run(db, "heartbeat")
+
+    assert run is not None
+    assert run.id == good
+    assert run.ok is True
+
+
+def test_last_successful_job_run_only_looks_at_that_job(db: sqlite3.Connection) -> None:
+    other = start_job_run(db, "collector", T1)
+    finish_job_run(db, other, T1, ok=True, items_processed=3)
+
+    assert last_successful_job_run(db, "heartbeat") is None
+
+
+def test_last_successful_job_run_newest_wins(db: sqlite3.Connection) -> None:
+    for moment in (T0, T1):
+        run_id = start_job_run(db, "heartbeat", moment)
+        finish_job_run(db, run_id, moment, ok=True, items_processed=0)
+
+    run = last_successful_job_run(db, "heartbeat")
+
+    assert run is not None
+    assert run.started_at == T1

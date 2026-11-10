@@ -15,6 +15,8 @@ Requires [uv](https://docs.astral.sh/uv/). uv installs the Python version pinned
 uv sync                                          # install from uv.lock
 cp config.example.toml config.toml              # your settings (never committed)
 cp .env.example .env                             # your API keys, only when needed
+uv run python -m ledgermind run                  # run the bot (Ctrl+C to stop)
+uv run python -m ledgermind status               # mode, last heartbeat, last run per job
 uv run pytest                                    # run the tests (offline)
 uv run ruff check && uv run ruff format --check  # lint + format check
 uv run ruff format                               # apply formatting
